@@ -134,7 +134,7 @@ class PESTO(LightningModule):
         )  # WARNING: augmented view is y2t!
 
         # supervised
-        super_loss = self.super_loss_fn(reduce_activations(y), pitch)
+        super_loss = self.super_loss_fn(y, pitch)
 
         # weighting
         total_loss = self.loss_weighting.combine_losses(

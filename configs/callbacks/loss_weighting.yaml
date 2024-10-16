@@ -4,4 +4,5 @@ loss_weighting:
     invariance: 0.
     shift_entropy: 1.
     equivariance: 0.
+    supervised: 0.
   ema_rate: 0.999
