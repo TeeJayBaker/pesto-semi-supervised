@@ -62,3 +62,5 @@ transforms:
     min_gain: 0.5
     max_gain: 1.5
     p: 0.7
+
+self_supervised: false

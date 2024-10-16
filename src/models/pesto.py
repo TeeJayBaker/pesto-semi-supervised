@@ -28,11 +28,13 @@ class PESTO(LightningModule):
         pitch_shift_kwargs: Mapping[str, Any] | None = None,
         transforms: Sequence[nn.Module] | None = None,
         reduction: str = "alwa",
+        self_supervised: bool = True,
     ):
         super(PESTO, self).__init__()
         self.encoder = encoder
         self.optimizer_cls = optimizer
         self.scheduler_cls = scheduler
+        self.self_supervised = self_supervised
 
         # loss definitions
         self.equiv_loss_fn = equiv_loss_fn or NullLoss()
@@ -108,7 +110,9 @@ class PESTO(LightningModule):
         self.labels.append(labels)
 
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        x, pitch = batch  # we do not use the eventual labels during training
+        x, pitch = batch
+        if self.self_supervised:
+            pitch = torch.full_like(pitch, float("nan"))
 
         # pitch-shift
         x, xt, n_steps = self.pitch_shift(x)

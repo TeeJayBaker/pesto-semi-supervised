@@ -95,13 +95,21 @@ class LabelCrossEntropy(nn.Module):
             torch.Tensor: Loss value.
         """
 
+        labeled = ~torch.isnan(target)
+        if labeled.sum() == 0:
+            return torch.tensor(0.0, device=pred.device, requires_grad=True)
+
         if self.mode == "absolute":
             return self.criterion(
-                pred,
-                gaussian_peak_tensor(target * self.bps, 0.2 * self.bps, self.bps),
+                pred[labeled],
+                gaussian_peak_tensor(
+                    target[labeled] * self.bps, 0.2 * self.bps, self.bps
+                ),
             )
         elif self.mode == "octave":
             return self.criterion(
-                pred,
-                gaussian_cosine_tensor(target * self.bps, 2 * self.bps, self.bps),
+                pred[labeled],
+                gaussian_cosine_tensor(
+                    target[labeled] * self.bps, 2 * self.bps, self.bps
+                ),
             )

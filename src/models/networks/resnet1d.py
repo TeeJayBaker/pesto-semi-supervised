@@ -9,9 +9,9 @@ class ToeplitzLinear(nn.Conv1d):
         super(ToeplitzLinear, self).__init__(
             in_channels=1,
             out_channels=1,
-            kernel_size=in_features+out_features-1,
-            padding=out_features-1,
-            bias=False
+            kernel_size=in_features + out_features - 1,
+            padding=out_features - 1,
+            bias=False,
         )
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:
@@ -40,29 +40,33 @@ class Resnet1d(nn.Module):
         p_dropout:        Dropout probability
     """
 
-    def __init__(self,
-                 n_chan_input=1,
-                 n_chan_layers=(20, 20, 10, 1),
-                 n_prefilt_layers=1,
-                 prefilt_kernel_size=15,
-                 residual=False,
-                 n_bins_in=216,
-                 output_dim=128,
-                 activation_fn: str = "leaky",
-                 a_lrelu=0.3,
-                 p_dropout=0.2):
+    def __init__(
+        self,
+        n_chan_input=1,
+        n_chan_layers=(20, 20, 10, 1),
+        n_prefilt_layers=1,
+        prefilt_kernel_size=15,
+        residual=False,
+        n_bins_in=216,
+        output_dim=128,
+        activation_fn: str = "leaky",
+        a_lrelu=0.3,
+        p_dropout=0.2,
+    ):
         super(Resnet1d, self).__init__()
 
-        self.hparams = dict(n_chan_input=n_chan_input,
-                            n_chan_layers=n_chan_layers,
-                            n_prefilt_layers=n_prefilt_layers,
-                            prefilt_kernel_size=prefilt_kernel_size,
-                            residual=residual,
-                            n_bins_in=n_bins_in,
-                            output_dim=output_dim,
-                            activation_fn=activation_fn,
-                            a_lrelu=a_lrelu,
-                            p_dropout=p_dropout)
+        self.hparams = dict(
+            n_chan_input=n_chan_input,
+            n_chan_layers=n_chan_layers,
+            n_prefilt_layers=n_prefilt_layers,
+            prefilt_kernel_size=prefilt_kernel_size,
+            residual=residual,
+            n_bins_in=n_bins_in,
+            output_dim=output_dim,
+            activation_fn=activation_fn,
+            a_lrelu=a_lrelu,
+            p_dropout=p_dropout,
+        )
 
         if activation_fn == "relu":
             activation_layer = nn.ReLU
@@ -84,40 +88,50 @@ class Resnet1d(nn.Module):
         # Prefiltering
         prefilt_padding = prefilt_kernel_size // 2
         self.conv1 = nn.Sequential(
-            nn.Conv1d(in_channels=n_in,
-                      out_channels=n_ch[0],
-                      kernel_size=prefilt_kernel_size,
-                      padding=prefilt_padding,
-                      stride=1),
+            nn.Conv1d(
+                in_channels=n_in,
+                out_channels=n_ch[0],
+                kernel_size=prefilt_kernel_size,
+                padding=prefilt_padding,
+                stride=1,
+            ),
             activation_layer(),
-            nn.Dropout(p=p_dropout)
+            nn.Dropout(p=p_dropout),
         )
         self.n_prefilt_layers = n_prefilt_layers
-        self.prefilt_layers = nn.ModuleList(*[
-            nn.Sequential(
-                nn.Conv1d(in_channels=n_ch[0],
-                          out_channels=n_ch[0],
-                          kernel_size=prefilt_kernel_size,
-                          padding=prefilt_padding,
-                          stride=1),
-                activation_layer(),
-                nn.Dropout(p=p_dropout)
-            )
-            for _ in range(n_prefilt_layers-1)
-        ])
+        self.prefilt_layers = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Conv1d(
+                        in_channels=n_ch[0],
+                        out_channels=n_ch[0],
+                        kernel_size=prefilt_kernel_size,
+                        padding=prefilt_padding,
+                        stride=1,
+                    ),
+                    activation_layer(),
+                    nn.Dropout(p=p_dropout),
+                )
+                for _ in range(n_prefilt_layers - 1)
+            ]
+        )
         self.residual = residual
 
         conv_layers = []
-        for i in range(len(n_chan_layers)-1):
-            conv_layers.extend([
-                nn.Conv1d(in_channels=n_ch[i],
-                          out_channels=n_ch[i + 1],
-                          kernel_size=1,
-                          padding=0,
-                          stride=1),
-                activation_layer(),
-                nn.Dropout(p=p_dropout)
-            ])
+        for i in range(len(n_chan_layers) - 1):
+            conv_layers.extend(
+                [
+                    nn.Conv1d(
+                        in_channels=n_ch[i],
+                        out_channels=n_ch[i + 1],
+                        kernel_size=1,
+                        padding=0,
+                        stride=1,
+                    ),
+                    activation_layer(),
+                    nn.Dropout(p=p_dropout),
+                ]
+            )
         self.conv_layers = nn.Sequential(*conv_layers)
 
         self.flatten = nn.Flatten(start_dim=1)
