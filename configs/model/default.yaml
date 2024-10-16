@@ -32,6 +32,11 @@ sce_loss_fn:
   pad_length: ${model.pitch_shift_kwargs.max_steps}
   criterion: ${model.inv_loss_fn}
 
+sup_loss_fn:
+  _target_: src.losses.supervised.LabelCrossEntropy
+  num_classes: ${eval:12 * ${data.data.bins_per_semitone}} # 12 semitones * 3 bins per semitone
+  mode: 'distance'
+
 optimizer:
   _target_: torch.optim.Adam
   _partial_: true

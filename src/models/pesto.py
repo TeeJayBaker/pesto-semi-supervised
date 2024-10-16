@@ -16,16 +16,19 @@ log = logging.getLogger(__name__)
 
 
 class PESTO(LightningModule):
-    def __init__(self,
-                 encoder: nn.Module,
-                 optimizer: torch.optim.Optimizer,
-                 scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
-                 equiv_loss_fn: nn.Module | None = None,
-                 sce_loss_fn: nn.Module | None = None,
-                 inv_loss_fn: nn.Module | None = None,
-                 pitch_shift_kwargs: Mapping[str, Any] | None = None,
-                 transforms: Sequence[nn.Module] | None = None,
-                 reduction: str = "alwa"):
+    def __init__(
+        self,
+        encoder: nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
+        equiv_loss_fn: nn.Module | None = None,
+        sce_loss_fn: nn.Module | None = None,
+        inv_loss_fn: nn.Module | None = None,
+        super_loss_fn: nn.Module | None = None,
+        pitch_shift_kwargs: Mapping[str, Any] | None = None,
+        transforms: Sequence[nn.Module] | None = None,
+        reduction: str = "alwa",
+    ):
         super(PESTO, self).__init__()
         self.encoder = encoder
         self.optimizer_cls = optimizer
@@ -35,6 +38,7 @@ class PESTO(LightningModule):
         self.equiv_loss_fn = equiv_loss_fn or NullLoss()
         self.sce_loss_fn = sce_loss_fn or NullLoss()
         self.inv_loss_fn = inv_loss_fn or NullLoss()
+        self.super_loss_fn = super_loss_fn or NullLoss()
 
         # pitch-shift CQT
         if pitch_shift_kwargs is None:
@@ -42,7 +46,9 @@ class PESTO(LightningModule):
         self.pitch_shift = PitchShiftCQT(**pitch_shift_kwargs)
 
         # preprocessing and transforms
-        self.transforms = nn.Sequential(*transforms) if transforms is not None else nn.Identity()
+        self.transforms = (
+            nn.Sequential(*transforms) if transforms is not None else nn.Identity()
+        )
         self.reduction = reduction
 
         # loss weighting
@@ -53,15 +59,16 @@ class PESTO(LightningModule):
         self.labels = None
 
         # constant shift to get absolute pitch from predictions
-        self.register_buffer('shift', torch.zeros((), dtype=torch.float), persistent=True)
+        self.register_buffer(
+            "shift", torch.zeros((), dtype=torch.float), persistent=True
+        )
 
         # save hparams
         self.hyperparams = dict(encoder=encoder.hparams, pitch_shift=pitch_shift_kwargs)
 
-    def forward(self,
-                x: torch.Tensor,
-                shift: bool = True,
-                return_activations: bool = False) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    def forward(
+        self, x: torch.Tensor, shift: bool = True, return_activations: bool = False
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         x, *_ = self.pitch_shift(x)  # the CQT has to be cropped beforehand
 
         activations = self.encoder(x)
@@ -93,17 +100,15 @@ class PESTO(LightningModule):
 
         self.estimate_shift()
 
-    def on_validation_batch_end(self,
-                                outputs,
-                                batch,
-                                batch_idx: int,
-                                dataloader_idx: int = 0) -> None:
+    def on_validation_batch_end(
+        self, outputs, batch, batch_idx: int, dataloader_idx: int = 0
+    ) -> None:
         preds, labels = outputs
         self.predictions.append(preds)
         self.labels.append(labels)
 
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        x, _ = batch  # we do not use the eventual labels during training
+        x, pitch = batch  # we do not use the eventual labels during training
 
         # pitch-shift
         x, xt, n_steps = self.pitch_shift(x)
@@ -124,20 +129,33 @@ class PESTO(LightningModule):
         shift_entropy_loss = self.sce_loss_fn(ya, yt, n_steps)
 
         # equivariance
-        equiv_loss = self.equiv_loss_fn(ya, yt, n_steps)  # WARNING: augmented view is y2t!
+        equiv_loss = self.equiv_loss_fn(
+            ya, yt, n_steps
+        )  # WARNING: augmented view is y2t!
+
+        # supervised
+        super_loss = self.super_loss_fn(reduce_activations(y), pitch)
 
         # weighting
-        total_loss = self.loss_weighting.combine_losses(invariance=inv_loss,
-                                                        shift_entropy=shift_entropy_loss,
-                                                        equivariance=equiv_loss)
+        total_loss = self.loss_weighting.combine_losses(
+            invariance=inv_loss,
+            shift_entropy=shift_entropy_loss,
+            equivariance=equiv_loss,
+            supervised=super_loss,
+        )
 
         # add elems to dict
-        loss_dict = dict(invariance=inv_loss,
-                         equivariance=equiv_loss,
-                         shift_entropy=shift_entropy_loss,
-                         loss=total_loss)
+        loss_dict = dict(
+            invariance=inv_loss,
+            equivariance=equiv_loss,
+            shift_entropy=shift_entropy_loss,
+            supervised=super_loss,
+            loss=total_loss,
+        )
 
-        self.log_dict({f"loss/{k}/train": v for k, v in loss_dict.items()}, sync_dist=False)
+        self.log_dict(
+            {f"loss/{k}/train": v for k, v in loss_dict.items()}, sync_dist=False
+        )
 
         return total_loss
 
@@ -150,7 +168,9 @@ class PESTO(LightningModule):
         It is not used in this repo but enables to load the model from the pip-installable inference repository.
         """
         checkpoint["hparams"] = remove_omegaconf_dependencies(self.hyperparams)
-        checkpoint['hcqt_params'] = remove_omegaconf_dependencies(self.trainer.datamodule.hcqt_kwargs)
+        checkpoint["hcqt_params"] = remove_omegaconf_dependencies(
+            self.trainer.datamodule.hcqt_kwargs
+        )
 
     def configure_optimizers(self) -> Mapping[str, Any]:
         """Choose what optimizers and learning-rate schedulers to use in your optimization.
@@ -195,7 +215,9 @@ class PESTO(LightningModule):
         # 5. Define the shift as the median distance and check that the std is low-enough
         shift, std = diff.median(), diff.std()
 
-        log.info(f"Estimated shift: {shift.cpu().item():.3f} (std = {std.cpu().item():.3f})")
+        log.info(
+            f"Estimated shift: {shift.cpu().item():.3f} (std = {std.cpu().item():.3f})"
+        )
 
         # 6. Update `self.shift` value
         self.shift.fill_(shift)
