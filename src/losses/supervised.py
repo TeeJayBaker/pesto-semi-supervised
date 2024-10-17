@@ -97,7 +97,7 @@ class LabelCrossEntropy(nn.Module):
 
         labeled = ~torch.isnan(target)
         if labeled.sum() == 0:
-            return torch.tensor(0.0, device=pred.device, requires_grad=True)
+            return pred.sum() * 0.0
 
         if self.mode == "absolute":
             return self.criterion(
