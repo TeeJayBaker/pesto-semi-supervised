@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.losses.entropy import CrossEntropyLoss
+from src.utils import reduce_activations
 
 
 def gaussian_peak_tensor(centre: torch.Tensor, spread: int, bins_per_semitone: int):
@@ -53,6 +54,39 @@ def gaussian_cosine_tensor(centre: torch.Tensor, spread: int, bins_per_semitone:
     )
 
 
+class Label_Distance(nn.Module):
+    def __init__(
+        self,
+        bins_per_semitone: int,
+        mode: str = "absolute",
+        criterion: nn.Module = nn.MSELoss(),
+    ):
+        """
+        Args:
+            bins_per_semitone (int): Number of bins per semitone.
+        """
+        super(Label_Distance, self).__init__()
+        assert mode in ["absolute", "octave"]
+        self.mode = mode
+        self.bps = bins_per_semitone
+
+        self.criterion = criterion
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            pred (torch.Tensor): Tensor of Predicted labels (batch_size).
+            target (torch.Tensor): Target labels (batch_size).
+
+        Returns:
+            torch.Tensor: Loss value.
+        """
+        if self.mode == "absolute":
+            return self.criterion(pred, target)
+        elif self.mode == "octave":
+            return self.criterion(pred % (12 * self.bps), target % (12 * self.bps))
+
+
 class LabelCrossEntropy(nn.Module):
     def __init__(
         self,
@@ -67,9 +101,10 @@ class LabelCrossEntropy(nn.Module):
             criterion (nn.Module): Loss function, default is CrossEntropyLoss.
         """
         super(LabelCrossEntropy, self).__init__()
-        assert mode in ["absolute", "octave"]
+        assert mode in ["absolute", "octave", "distance"]
         self.mode = mode
         self.criterion = criterion
+        self.distance = Label_Distance(bins_per_semitone, "absolute")
         self.bps = bins_per_semitone
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -99,4 +134,10 @@ class LabelCrossEntropy(nn.Module):
                 gaussian_cosine_tensor(
                     target[labeled] * self.bps, 2 * self.bps, self.bps
                 ),
+            )
+
+        elif self.mode == "distance":
+            mask = torch.nonzero(target[labeled], as_tuple=True)[0]
+            return self.distance(
+                reduce_activations(pred[labeled][mask]), target[labeled][mask]
             )
