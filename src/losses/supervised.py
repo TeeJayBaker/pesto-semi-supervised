@@ -53,19 +53,6 @@ def gaussian_cosine_tensor(centre: torch.Tensor, spread: int, bins_per_semitone:
     )
 
 
-def one_hot_tensor(centre: torch.Tensor):
-    """
-    Converts a tensor of target labels to one(ish)-hot encoding.
-
-    Args:
-        target (torch.Tensor): A tensor of shape (batch_size) containing target labels.
-        num_classes (int): Number of classes.
-
-    Returns:
-        torch.Tensor: A tensor of shape (batch_size, num_classes) containing one-hot encoded labels.
-    """
-
-
 class LabelCrossEntropy(nn.Module):
     def __init__(
         self,
