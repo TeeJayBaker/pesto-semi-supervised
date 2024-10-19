@@ -10,9 +10,11 @@ import torchaudio
 from src.models.pesto import PESTO
 from src.models.networks.resnet1d import Resnet1d
 from src.data.hcqt import HarmonicCQT as Preprocessor
+from src.data.transforms import ToLogMagnitude
+from src.data.audio_datamodule import mid_to_hz
 
 
-def plot_csv(csv_path):
+def plot_csv(csv_path: str):
     # Read the CSV file without pandas
     times = []
     frequencies = []
@@ -42,7 +44,7 @@ def plot_csv(csv_path):
 
     # Plotting
     plt.figure(figsize=(10, 6))
-    sc = plt.scatter(times / 1000, frequencies, c=confidences, cmap="viridis", s=5)
+    sc = plt.scatter(times / 1000, frequencies, c=confidences, cmap="viridis_r", s=5)
     plt.colorbar(sc, label="Confidence")
 
     # Set logarithmic scale on the y-axis between 32 and 4096
@@ -61,8 +63,7 @@ def plot_csv(csv_path):
     print(f"Plot saved as {output_png_path}")
 
 
-# TODO fix the simple inference function for new models
-def run_inference(model_ckpt_path, audio_path):
+def run_inference(model_ckpt_path: str, audio_path: str, hop_size: float = 10.0):
     # Placeholder for model loading and inference
     # In practice, you'd load your model and run inference on the audio
     # For this example, we'll simulate some data
@@ -76,37 +77,52 @@ def run_inference(model_ckpt_path, audio_path):
         return
 
     checkpoint = torch.load(model_ckpt_path, map_location=torch.device("cpu"))
-    import ipdb
 
-    ipdb.set_trace()
     hparams = checkpoint["hparams"]
     hcqt_params = checkpoint["hcqt_params"]
     state_dict = checkpoint["state_dict"]
-    hop_size = 10.0
 
-    # instantiate preprocessor
+    # instantiate preprocessors
     hop_length = int(hop_size * sr / 1000 + 0.5)
     preprocessor = Preprocessor(hop_length=hop_length, sr=sr, **hcqt_params)
+    transform = ToLogMagnitude()
 
     # instantiate PESTO encoder
     encoder = Resnet1d(**hparams["encoder"])
 
-    # Conver to mono
+    # Convert to mono and compute HCQT
     x = x.mean(dim=0)
-
-    hcqt_kernels = preprocessor(x)
+    hcqt_kernels = preprocessor(x).squeeze(0).permute(2, 0, 1, 3)
+    # (time, harmonics, freq_bins, 2)
+    hcqt_kernels = transform(hcqt_kernels)  # Complex to log magnitude
 
     # instantiate main PESTO module and load its weights
     model = PESTO(
         encoder,
-        crop_kwargs=hparams["pitch_shift"],
+        torch.optim.Adam,  # dummy optimiser for now
+        pitch_shift_kwargs=hparams["pitch_shift"],
         reduction=hparams["reduction"],
     )
     model.load_state_dict(state_dict, strict=False)
     model.eval()
 
-    pred, conf = model(hcqt_kernels, sr=sr, return_activations=False)
+    # Confidences are all 1 for now as the confidence head is linear
+    pred, _ = model(hcqt_kernels)
+    pred = mid_to_hz(pred)
     timesteps = torch.arange(pred.size(-1)) * hop_size
+
+    # Calculate confidence naively from CQT energy
+    confidence = hcqt_kernels.mean(dim=-2).max(dim=-1).values
+    conf_min, conf_max = (
+        confidence.min(dim=-1, keepdim=True).values,
+        confidence.max(dim=-1, keepdim=True).values,
+    )
+    confidence = (confidence - conf_min) / (conf_max - conf_min)
+    # Detach tensors
+
+    pred = pred.detach().numpy()
+    conf = confidence.detach().numpy()
+    timesteps = timesteps.numpy()
 
     # Determine output CSV path from audio path
     base, _ = os.path.splitext(audio_path)
@@ -117,14 +133,14 @@ def run_inference(model_ckpt_path, audio_path):
         fieldnames = ["time", "frequency", "confidence"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
-        for t, f, c in zip(timesteps, pred, conf):
+        for t, f, c in zip(timesteps, pred, conf.squeeze()):
             writer.writerow({"time": t, "frequency": f, "confidence": c})
 
     print(f"Inference results saved as {csv_output_path}")
     return csv_output_path
 
 
-def generate_spectrogram(audio_path):
+def generate_spectrogram(audio_path: str):
     assert os.path.exists(audio_path), "Audio path does not exist."
 
     y, sr = librosa.load(audio_path)
@@ -163,11 +179,13 @@ def main():
     parser.add_argument("--csv", type=str, help="Path to CSV file.")
     parser.add_argument("--audio", type=str, help="Path to audio file.")
     parser.add_argument("--ckpt", type=str, help="Path to model checkpoint.")
+    parser.add_argument("--hop", type=float, default=10.0, help="Hop size in ms.")
 
     args = parser.parse_args()
     if args.inference:
         assert args.ckpt, "Model checkpoint path must be provided for inference."
         assert args.audio, "Audio path must be provided for inference."
+        assert args.csv is None, "Csv will be generated during inference."
         csv_path = run_inference(args.ckpt, args.audio)
 
     if args.plot:
