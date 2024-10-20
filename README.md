@@ -1,3 +1,13 @@
+# PESTO with extra semi-supervised objectives
+
+This is an repo that adds some extra supervised objectives to the PESTO training pipeline. In some instances when used along with the original objectives it can add very minor performance gains, other times it hinders it, use at your own peril!
+
+To enable, change to the argument `self_supervised` to `False` in `config/model/default.yml` and feed the model labelled data as usual. 
+All objective options are under the new loss `super_loss_fn` in the same config.
+
+See below the original readme for full comprehensive training instructions.
+
+
 # PESTO: Pitch Estimation with Self-Supervised Transposition-equivariant Objective
 
 **tl;dr:** Fast pitch estimation with self-supervised learning
