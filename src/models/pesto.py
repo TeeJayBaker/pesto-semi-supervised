@@ -29,6 +29,7 @@ class PESTO(LightningModule):
         transforms: Sequence[nn.Module] | None = None,
         reduction: str = "alwa",
         self_supervised: bool = True,
+        pt_ckpt: str | None = None,
     ):
         super(PESTO, self).__init__()
         self.encoder = encoder
@@ -67,6 +68,10 @@ class PESTO(LightningModule):
 
         # save hparams
         self.hyperparams = dict(encoder=encoder.hparams, pitch_shift=pitch_shift_kwargs)
+
+        if pt_ckpt is not None:
+            self.load_state_dict(torch.load(pt_ckpt, weights_only=False)["state_dict"])
+            print(f"Loaded weights from {pt_ckpt}")
 
     def forward(
         self, x: torch.Tensor, shift: bool = True, return_activations: bool = False
